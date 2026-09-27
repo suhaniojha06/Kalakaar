@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   TouchableOpacity,
   Text,
@@ -27,14 +27,14 @@ export const AudioButton: React.FC<AudioButtonProps> = ({
   style,
   variant = 'compact',
 }) => {
-  // Wave bar animated heights
-  const wave1 = useRef(new Animated.Value(6)).current;
-  const wave2 = useRef(new Animated.Value(12)).current;
-  const wave3 = useRef(new Animated.Value(18)).current;
-  const wave4 = useRef(new Animated.Value(10)).current;
+  // Wave bar animated heights using useMemo
+  const wave1 = useMemo(() => new Animated.Value(6), []);
+  const wave2 = useMemo(() => new Animated.Value(12), []);
+  const wave3 = useMemo(() => new Animated.Value(18), []);
+  const wave4 = useMemo(() => new Animated.Value(10), []);
 
   useEffect(() => {
-    let animLoop: Animated.CompositeAnimation;
+    let animLoop: Animated.CompositeAnimation | undefined;
     if (isPlaying) {
       animLoop = Animated.loop(
         Animated.sequence([
@@ -62,7 +62,7 @@ export const AudioButton: React.FC<AudioButtonProps> = ({
     return () => {
       if (animLoop) animLoop.stop();
     };
-  }, [isPlaying]);
+  }, [isPlaying, wave1, wave2, wave3, wave4]);
 
   const isFull = variant === 'full';
 

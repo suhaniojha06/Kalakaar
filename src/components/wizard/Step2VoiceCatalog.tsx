@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,11 +6,14 @@ import {
   TouchableOpacity,
   ScrollView,
   Animated,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SIZES } from '../../constants/colors';
+import { COLORS } from '../../constants/colors';
 import { useLanguage } from '../../context/LanguageContext';
 import { useProduct } from '../../context/ProductContext';
+import { SAMPLE_CRAFTS } from '../../data/sampleCrafts';
 import { AudioButton } from '../common/AudioButton';
 import { Button } from '../common/Button';
 
@@ -21,20 +24,31 @@ export const Step2VoiceCatalog: React.FC = () => {
     isRecording,
     recordingSeconds,
     liveTranscript,
+    isProcessingAudio,
+    audioProcessingStatus,
+    audioMetadata,
+    transcriptionConfidence,
+    currentAudioUrl,
     playingAudioId,
     toggleAudioPlayback,
     startVoiceRecording,
     stopVoiceRecording,
+    processAudioInput,
+    uploadAudioFile,
     nextStep,
     prevStep,
   } = useProduct();
 
-  // Pulsing animation values for the microphone button
-  const pulseScale = useRef(new Animated.Value(1)).current;
-  const pulseOpacity = useRef(new Animated.Value(0.6)).current;
+  // Hidden web file input reference for audio upload
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Pulsing animation values for the microphone button using useMemo
+  const pulseScale = useMemo(() => new Animated.Value(1), []);
+  const pulseOpacity = useMemo(() => new Animated.Value(0.6), []);
+  const progressBarAnim = useMemo(() => new Animated.Value(0), []);
 
   useEffect(() => {
-    let pulseAnim: Animated.CompositeAnimation;
+    let pulseAnim: Animated.CompositeAnimation | undefined;
     if (isRecording) {
       pulseAnim = Animated.loop(
         Animated.parallel([
@@ -56,7 +70,52 @@ export const Step2VoiceCatalog: React.FC = () => {
     return () => {
       if (pulseAnim) pulseAnim.stop();
     };
-  }, [isRecording]);
+  }, [isRecording, pulseScale, pulseOpacity]);
+
+  // Animate processing progress bar when status changes
+  useEffect(() => {
+    if (isProcessingAudio && audioProcessingStatus?.progress) {
+      Animated.timing(progressBarAnim, {
+        toValue: audioProcessingStatus.progress,
+        duration: 250,
+        useNativeDriver: false,
+      }).start();
+    } else if (!isProcessingAudio) {
+      progressBarAnim.setValue(0);
+    }
+  }, [isProcessingAudio, audioProcessingStatus?.progress, progressBarAnim]);
+
+  const handleUploadClick = () => {
+    if (Platform.OS === 'web') {
+      if (fileInputRef.current) {
+        fileInputRef.current.click();
+      } else {
+        // Fallback programmatic input for web
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'audio/*';
+        input.onchange = (e: any) => {
+          const file = e.target?.files?.[0];
+          if (file) {
+            uploadAudioFile(file);
+          }
+        };
+        input.click();
+      }
+    } else {
+      // In mobile environment, trigger sample audio processing as demonstration
+      processAudioInput(activeDraft.sampleVoiceNote.id);
+    }
+  };
+
+  const handleWebFileInputChange = (event: any) => {
+    const file = event.target?.files?.[0];
+    if (file) {
+      uploadAudioFile(file);
+      // Reset input value so same file can be re-selected if needed
+      event.target.value = '';
+    }
+  };
 
   const productName =
     currentLanguage === 'hi'
@@ -86,11 +145,57 @@ export const Step2VoiceCatalog: React.FC = () => {
       ? activeDraft.metadata.craftStoryPa
       : activeDraft.metadata.craftStoryEn;
 
+  const activeAudioId = currentAudioUrl || activeDraft.sampleVoiceNote.id;
+  const isPlayingActiveAudio = playingAudioId === activeAudioId;
+  const activeDuration = audioMetadata?.durationSeconds || activeDraft.sampleVoiceNote.durationSeconds;
+
   return (
     <ScrollView
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
     >
+      {/* Hidden file input for web audio upload */}
+      {Platform.OS === 'web' && (
+        <input
+          ref={fileInputRef as any}
+          type="file"
+          accept="audio/*"
+          style={{ display: 'none' }}
+          onChange={handleWebFileInputChange}
+        />
+      )}
+
+      {/* Audio Input Modes Header Bar */}
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={isRecording ? stopVoiceRecording : startVoiceRecording}
+          style={[styles.modeBtn, isRecording ? styles.modeBtnRecording : styles.modeBtnPrimary]}
+          accessibilityRole="button"
+          accessibilityLabel={isRecording ? 'Stop Recording' : 'Record Voice'}
+        >
+          <Ionicons
+            name={isRecording ? 'stop-circle' : 'mic'}
+            size={20}
+            color={COLORS.textInverse}
+          />
+          <Text style={styles.modeBtnText}>
+            {isRecording ? `Stop (0:0${recordingSeconds}s)` : 'Record Voice'}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={handleUploadClick}
+          style={styles.modeBtnSecondary}
+          accessibilityRole="button"
+          accessibilityLabel="Upload Audio File"
+        >
+          <Ionicons name="cloud-upload-outline" size={20} color={COLORS.primary} />
+          <Text style={styles.modeBtnSecondaryText}>Upload Audio</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Central Pulsing Microphone Section */}
       <View style={styles.micSectionCard}>
         <Text style={styles.micInstructionHeader}>
@@ -98,8 +203,8 @@ export const Step2VoiceCatalog: React.FC = () => {
         </Text>
         <Text style={styles.micInstructionSub}>
           {isRecording
-            ? `Recording: 0:0${recordingSeconds}s • Tap microphone to finish`
-            : 'Speak naturally in your mother tongue (Hindi, Punjabi, etc.)'}
+            ? `Recording: 0:0${recordingSeconds}s • Tap microphone to process audio`
+            : 'Speak naturally in your mother tongue (Hindi, Punjabi, Telugu, etc.)'}
         </Text>
 
         {/* Pulsing concentric rings wrapper */}
@@ -134,7 +239,7 @@ export const Step2VoiceCatalog: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Recording status chip */}
+        {/* Recording / Model status chip */}
         <View
           style={[
             styles.statusChip,
@@ -148,38 +253,142 @@ export const Step2VoiceCatalog: React.FC = () => {
             ]}
           />
           <Text style={styles.statusChipText}>
-            {isRecording ? `Listening (${recordingSeconds}s)...` : 'AI Speech Model: Ready'}
+            {isRecording
+              ? `Listening (${recordingSeconds}s)...`
+              : isProcessingAudio
+              ? 'AI Speech Model: Processing Audio...'
+              : 'AI Speech Model: Ready'}
           </Text>
         </View>
       </View>
 
-      {/* Live Regional Transcription Chip */}
+      {/* Audio Processing Visual State */}
+      {isProcessingAudio && (
+        <View style={styles.processingCard}>
+          <View style={styles.processingHeaderRow}>
+            <ActivityIndicator size="small" color={COLORS.primary} />
+            <Text style={styles.processingHeaderText}>
+              Processing Audio Input & Generating Transcript
+            </Text>
+            <Text style={styles.processingPercent}>
+              {audioProcessingStatus?.progress || 35}%
+            </Text>
+          </View>
+
+          {/* Animated Progress Bar */}
+          <View style={styles.progressBarTrack}>
+            <Animated.View
+              style={[
+                styles.progressBarFill,
+                {
+                  width: progressBarAnim.interpolate({
+                    inputRange: [0, 100],
+                    outputRange: ['0%', '100%'],
+                  }),
+                },
+              ]}
+            />
+          </View>
+
+          <Text style={styles.processingSubText}>
+            {audioProcessingStatus?.message || 'Analyzing audio signal and frequencies...'}
+          </Text>
+        </View>
+      )}
+
+      {/* Preset Regional Artisan Audio Quick Switcher */}
+      <View style={styles.sampleVoiceSection}>
+        <View style={styles.sampleVoiceHeaderRow}>
+          <Ionicons name="musical-notes" size={16} color={COLORS.ochreDark} />
+          <Text style={styles.sampleVoiceTitle}>Test with Artisan Audio Recordings:</Text>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.sampleVoiceScroll}
+        >
+          {SAMPLE_CRAFTS.map((craft) => {
+            const isSelected = activeDraft.id === craft.id;
+            return (
+              <TouchableOpacity
+                key={craft.id}
+                activeOpacity={0.8}
+                onPress={() => processAudioInput(craft.sampleVoiceNote.id)}
+                style={[
+                  styles.audioChip,
+                  isSelected && styles.audioChipSelected,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`Process audio sample for ${craft.title}`}
+              >
+                <Ionicons
+                  name={isSelected ? 'checkmark-circle' : 'play-circle-outline'}
+                  size={18}
+                  color={isSelected ? COLORS.primary : COLORS.textMuted}
+                />
+                <Text
+                  style={[
+                    styles.audioChipText,
+                    isSelected && styles.audioChipTextSelected,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {craft.craftType.split('(')[0].trim()} Audio ({craft.sampleVoiceNote.durationSeconds}s)
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Live Accurate Regional Transcription Card */}
       <View style={styles.transcriptionCard}>
         <View style={styles.transcriptionHeaderRow}>
           <View style={styles.speechBadge}>
             <Ionicons name="chatbubble-ellipses" size={16} color={COLORS.primary} />
             <Text style={styles.speechBadgeText}>{t('speechPreview')}</Text>
           </View>
-          <Text style={styles.langIndicatorText}>
-            {currentLanguage.toUpperCase()} Recognizer
-          </Text>
+          <View style={styles.badgeRow}>
+            {transcriptionConfidence && (
+              <View style={styles.confidenceTag}>
+                <Ionicons name="checkmark-done" size={12} color={COLORS.successDark} />
+                <Text style={styles.confidenceText}>
+                  {Math.round(transcriptionConfidence * 100)}% Accuracy
+                </Text>
+              </View>
+            )}
+            <Text style={styles.langIndicatorText}>
+              {currentLanguage.toUpperCase()} Recognizer
+            </Text>
+          </View>
         </View>
 
-        <Text style={styles.transcriptQuote}>"{liveTranscript}"</Text>
+        {/* Audio Format / Duration Tag */}
+        {audioMetadata && (
+          <View style={styles.audioMetaRow}>
+            <Ionicons name="information-circle-outline" size={13} color={COLORS.textMuted} />
+            <Text style={styles.audioMetaText}>
+              Audio: {audioMetadata.durationSeconds}s • {audioMetadata.fileType} • {audioMetadata.fileName}
+            </Text>
+          </View>
+        )}
 
-        {/* Audio Re-listen Button */}
+        {/* The Accurate Generated Transcript */}
+        <Text style={styles.transcriptQuote}>&ldquo;{liveTranscript}&rdquo;</Text>
+
+        {/* Audio Re-listen Player Button */}
         <View style={styles.audioPlayerRow}>
           <AudioButton
-            isPlaying={playingAudioId === activeDraft.sampleVoiceNote.id}
-            onToggle={() => toggleAudioPlayback(activeDraft.sampleVoiceNote.id)}
-            durationSeconds={activeDraft.sampleVoiceNote.durationSeconds}
-            label={t('listenVoiceNote')}
+            isPlaying={isPlayingActiveAudio}
+            onToggle={() => toggleAudioPlayback(activeAudioId)}
+            durationSeconds={activeDuration}
+            label={isPlayingActiveAudio ? 'Playing Processed Audio...' : t('listenVoiceNote')}
             variant="full"
           />
         </View>
       </View>
 
-      {/* Auto-Extracted Preview Fields Required by Prompt */}
+      {/* Auto-Extracted Preview Fields from Accurate Transcript */}
       <View style={styles.extractedCard}>
         <View style={styles.extractedHeaderRow}>
           <Ionicons name="sparkles" size={18} color={COLORS.ochreDark} />
@@ -187,7 +396,7 @@ export const Step2VoiceCatalog: React.FC = () => {
             AI Auto-Extracted Catalog Fields
           </Text>
           <View style={styles.extractedTag}>
-            <Text style={styles.extractedTagText}>Auto-Filled</Text>
+            <Text style={styles.extractedTagText}>From Transcript</Text>
           </View>
         </View>
 
@@ -276,6 +485,56 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     paddingBottom: 40,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  modeBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 12,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  modeBtnPrimary: {
+    backgroundColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  modeBtnRecording: {
+    backgroundColor: COLORS.error,
+    shadowColor: COLORS.error,
+  },
+  modeBtnText: {
+    color: COLORS.textInverse,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  modeBtnSecondary: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    minHeight: 48,
+    borderRadius: 12,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  modeBtnSecondaryText: {
+    color: COLORS.primary,
+    fontSize: 14,
+    fontWeight: '800',
   },
   micSectionCard: {
     backgroundColor: COLORS.surface,
@@ -370,6 +629,92 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.textSecondary,
   },
+  processingCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: COLORS.ochreDark,
+    padding: 14,
+    marginBottom: 16,
+  },
+  processingHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  processingHeaderText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+    flex: 1,
+  },
+  processingPercent: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.ochreDark,
+  },
+  progressBarTrack: {
+    height: 6,
+    backgroundColor: COLORS.border,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginVertical: 4,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: COLORS.ochreDark,
+    borderRadius: 3,
+  },
+  processingSubText: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  sampleVoiceSection: {
+    marginBottom: 16,
+  },
+  sampleVoiceHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 6,
+  },
+  sampleVoiceTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  sampleVoiceScroll: {
+    gap: 8,
+  },
+  audioChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderWidth: 1.5,
+    borderColor: COLORS.borderDark,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    gap: 6,
+  },
+  audioChipSelected: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primarySubtle,
+  },
+  audioChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  audioChipTextSelected: {
+    color: COLORS.primaryDark,
+    fontWeight: '800',
+  },
   transcriptionCard: {
     backgroundColor: COLORS.primarySubtle,
     borderRadius: 16,
@@ -394,6 +739,25 @@ const styles = StyleSheet.create({
     color: COLORS.primaryDark,
     marginLeft: 6,
   },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  confidenceTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.successLight,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    gap: 3,
+  },
+  confidenceText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.successDark,
+  },
   langIndicatorText: {
     fontSize: 11,
     fontWeight: '700',
@@ -402,6 +766,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
+  },
+  audioMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 4,
+  },
+  audioMetaText: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    fontWeight: '600',
   },
   transcriptQuote: {
     fontSize: 14,

@@ -1,0 +1,10 @@
+C:\Users\Vinod\Documents\SIH\Kalakaar\AGENTS.md
+C:\Users\Vinod\Documents\SIH\Kalakaar\CLAUDE.md
+C:\Users\Vinod\Documents\SIH\Kalakaar\backend\.agents\rules\graphify.md
+C:\Users\Vinod\Documents\SIH\Kalakaar\backend\.agents\workflows\graphify.md
+C:\Users\Vinod\Documents\SIH\Kalakaar\assets\android-icon-background.png
+C:\Users\Vinod\Documents\SIH\Kalakaar\assets\android-icon-foreground.png
+C:\Users\Vinod\Documents\SIH\Kalakaar\assets\android-icon-monochrome.png
+C:\Users\Vinod\Documents\SIH\Kalakaar\assets\favicon.png
+C:\Users\Vinod\Documents\SIH\Kalakaar\assets\icon.png
+C:\Users\Vinod\Documents\SIH\Kalakaar\assets\splash-icon.png
